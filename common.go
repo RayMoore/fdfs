@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -73,12 +74,15 @@ func newFileInfo(fileName string, buffer []byte, fileExtName string) (*fileInfo,
 	}, nil
 }
 
-func (this *fileInfo) Close() {
-	if this == nil {
+func (f *fileInfo) Close() {
+	if f == nil {
 		return
 	}
-	if this.file != nil {
-		this.file.Close()
+	if f.file != nil {
+		err := f.file.Close()
+		if err != nil {
+			log.Fatalln(err)
+		}
 	}
 	return
 }
@@ -94,13 +98,13 @@ type header struct {
 	status int8
 }
 
-func (this *header) SendHeader(conn net.Conn) error {
+func (h *header) SendHeader(conn net.Conn) error {
 	buffer := new(bytes.Buffer)
-	if err := binary.Write(buffer, binary.BigEndian, this.pkgLen); err != nil {
+	if err := binary.Write(buffer, binary.BigEndian, h.pkgLen); err != nil {
 		return err
 	}
-	buffer.WriteByte(byte(this.cmd))
-	buffer.WriteByte(byte(this.status))
+	buffer.WriteByte(byte(h.cmd))
+	buffer.WriteByte(byte(h.status))
 
 	if _, err := conn.Write(buffer.Bytes()); err != nil {
 		return err
@@ -108,7 +112,7 @@ func (this *header) SendHeader(conn net.Conn) error {
 	return nil
 }
 
-func (this *header) RecvHeader(conn net.Conn) error {
+func (h *header) RecvHeader(conn net.Conn) error {
 	buf := make([]byte, 10)
 	if _, err := conn.Read(buf); err != nil {
 		return err
@@ -116,7 +120,7 @@ func (this *header) RecvHeader(conn net.Conn) error {
 
 	buffer := bytes.NewBuffer(buf)
 
-	if err := binary.Read(buffer, binary.BigEndian, &this.pkgLen); err != nil {
+	if err := binary.Read(buffer, binary.BigEndian, &h.pkgLen); err != nil {
 		return err
 	}
 	cmd, err := buffer.ReadByte()
@@ -130,8 +134,8 @@ func (this *header) RecvHeader(conn net.Conn) error {
 	if status != 0 {
 		return fmt.Errorf("recv resp status %d != 0", status)
 	}
-	this.cmd = int8(cmd)
-	this.status = int8(status)
+	h.cmd = int8(cmd)
+	h.status = int8(status)
 	return nil
 }
 

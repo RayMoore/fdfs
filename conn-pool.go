@@ -3,6 +3,7 @@ package fdfs
 import (
 	"container/list"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -50,7 +51,10 @@ func newConnPool(addr string, maxConns int) (*connPool, error) {
 					return
 				}
 			case <-timer.C:
-				connPool.CheckConns()
+				err := connPool.CheckConns()
+				if err != nil {
+					log.Fatalln(err)
+				}
 				timer.Reset(time.Second * 20)
 			}
 		}
@@ -65,77 +69,80 @@ func newConnPool(addr string, maxConns int) (*connPool, error) {
 	return connPool, nil
 }
 
-func (this *connPool) Destory() {
-	if this == nil {
+func (c *connPool) Destory() {
+	if c == nil {
 		return
 	}
-	this.finish <- true
+	c.finish <- true
 }
 
-func (this *connPool) CheckConns() error {
-	this.lock.Lock()
-	defer this.lock.Unlock()
-	for e, next := this.conns.Front(), new(list.Element); e != nil; e = next {
+func (c *connPool) CheckConns() error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	for e, next := c.conns.Front(), new(list.Element); e != nil; e = next {
 		next = e.Next()
 		conn := e.Value.(pConn)
 		header := &header{
 			cmd: FDFS_PROTO_CMD_ACTIVE_TEST,
 		}
 		if err := header.SendHeader(conn.Conn); err != nil {
-			this.conns.Remove(e)
-			this.count--
+			c.conns.Remove(e)
+			c.count--
 			continue
 		}
 		if err := header.RecvHeader(conn.Conn); err != nil {
-			this.conns.Remove(e)
-			this.count--
+			c.conns.Remove(e)
+			c.count--
 			continue
 		}
 		if header.cmd != TRACKER_PROTO_CMD_RESP || header.status != 0 {
-			this.conns.Remove(e)
-			this.count--
+			c.conns.Remove(e)
+			c.count--
 			continue
 		}
 	}
 	return nil
 }
 
-func (this *connPool) makeConn() error {
-	conn, err := net.DialTimeout("tcp", this.addr, time.Second*10)
+func (c *connPool) makeConn() error {
+	conn, err := net.DialTimeout("tcp", c.addr, time.Second*10)
 	if err != nil {
 		return err
 	}
-	this.conns.PushBack(pConn{
+	c.conns.PushBack(pConn{
 		Conn: conn,
-		pool: this,
+		pool: c,
 	})
-	this.count++
+	c.count++
 	return nil
 }
 
-func (this *connPool) get() (net.Conn, error) {
-	this.lock.Lock()
-	defer this.lock.Unlock()
+func (c *connPool) get() (net.Conn, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	for {
-		e := this.conns.Front()
+		e := c.conns.Front()
 		if e == nil {
-			if this.count >= this.maxConns {
-				return nil, fmt.Errorf("reach maxConns %d", this.maxConns)
+			if c.count >= c.maxConns {
+				return nil, fmt.Errorf("reach maxConns %d", c.maxConns)
 			}
-			this.makeConn()
+			err := c.makeConn()
+			if err != nil {
+				log.Println(err)
+			}
 			continue
 		}
-		this.conns.Remove(e)
+		c.conns.Remove(e)
 		conn := e.Value.(pConn)
 		return conn, nil
 	}
 	//not reach
-	return nil, nil
+	//return nil, nil
 }
 
-func (this *connPool) put(pConn pConn) error {
-	this.lock.Lock()
-	defer this.lock.Unlock()
+func (c *connPool) put(pConn pConn) error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	pConn.pool.conns.PushBack(pConn)
 	return nil
 }
